@@ -1,20 +1,18 @@
+import sys
+
+sys.path.insert(0, ".")
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.collections as clt
-import matplotlib as mpl
 from matplotlib.animation import FuncAnimation
 
 import numpy as np
 import random
 import time
 
-from diff_automaton import apply_rule
-
-
-def update_py(state):
-    """Calls python-side function to update state"""
-
-    return np.reshape(apply_rule(list(state.flatten()), state.shape[1]), state.shape)
+from automaton.common import State
+from automaton.rules import RuleDiffusion
 
 
 def finite_difference(state):
@@ -42,17 +40,15 @@ def finite_difference(state):
 if __name__ == "__main__":
     """Run as a script."""
 
+    # Create the rule
+    rule = RuleDiffusion(von_neumann=True, renormalize=True)
+
     # Get a random initial pattern
     width = 30
     height = 20
-    initial_pattern = np.empty((height, width), dtype=float)
-    for i in range(height):
-        for j in range(width):
-            initial_pattern[i, j] = random.random()
-    state = initial_pattern
+    state = np.random.random((height, width))
 
-    n_rows = state.shape[0]
-    n_columns = state.shape[1]
+    n_rows, n_columns = state.shape
 
     # Create a tickless figure
     fig, ax = plt.subplots()
@@ -106,7 +102,7 @@ if __name__ == "__main__":
         global state
 
         # And update it via the automaton rule.
-        state = update_py(state)
+        state = rule.apply(State(state)).data
 
         # computation finished time
         comp_time = time.time()
@@ -119,7 +115,8 @@ if __name__ == "__main__":
 
         # renormalize
         energy_after = np.sum(state)
-        state = state * (energy_before / energy_after)
+        if energy_after != 0:
+            state = state * (energy_before / energy_after)
 
         # compute derivative
         di, dj = finite_difference(state)
@@ -172,7 +169,7 @@ if __name__ == "__main__":
             wind_time - face_time,
         ]
         print(
-            f"Computation: {times[0]}, physics: {times[1]}, color: {times[2]}, face: {times[3]}, wind: {times[4]}"
+            f"Computation: {times[0]:.4f}, physics: {times[1]:.4f}, color: {times[2]:.4f}, face: {times[3]:.4f}, wind: {times[4]:.4f}"
         )
 
     # Let matplotlib do the real work

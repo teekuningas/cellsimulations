@@ -3,8 +3,20 @@ import matplotlib.patches as patches
 import matplotlib.collections as clt
 from matplotlib.animation import FuncAnimation
 
+import sys
+
+sys.path.insert(0, ".")
+
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import matplotlib.collections as clt
+from matplotlib.animation import FuncAnimation
+
 import numpy as np
 import random
+
+from automaton.common import State
+from automaton.rules import RuleDiffusion
 
 
 def init_plot(ax, sphere_radius, title):
@@ -128,88 +140,9 @@ def finite_difference(state):
     return di, dj
 
 
-def apply_automaton_rule(state, n_cells):
-    """Given state, compute next one. Arranged as loops for easy application in e.g GPU."""
-
-    n_layers = len(state) / n_cells
-
-    # initialize new state
-    new_state = np.zeros(len(state))
-
-    i = 0
-    while i < n_layers:
-        j = 0
-        while j < n_cells:
-
-            # current cell idx and value
-            curr_idx = n_cells * i + j
-            curr = state[curr_idx]
-
-            neighbourhood = []
-
-            # if there exists a higher layer
-            if i < n_layers - 1:
-                idx = n_cells * (i + 1) + j
-            else:
-                idx = curr_idx
-            neighbourhood.append(state[idx])
-
-            # if there exists a lower layer
-            if i > 0:
-                idx = n_cells * (i - 1) + j
-            else:
-                idx = curr_idx
-            neighbourhood.append(state[idx])
-
-            # if at the left edge, take the last one
-            if j == 0:
-                idx = n_cells * i + (n_cells - 1)
-            # otherwise take on to the left
-            else:
-                idx = n_cells * i + (j - 1)
-            neighbourhood.append(state[idx])
-
-            # if at the right edge, take the first one
-            if j == n_cells - 1:
-                idx = n_cells * i
-            # otherwise take on to the right
-            else:
-                idx = n_cells * i + (j + 1)
-            neighbourhood.append(state[idx])
-
-            total = curr
-            for nidx in range(len(neighbourhood)):
-                total += neighbourhood[nidx]
-
-            # update state by a (equal weights) neighbourhood average
-            new_state[curr_idx] = total / (len(neighbourhood) + 1)
-
-            j += 1
-        i += 1
-
-    # renormalize to not lose or increase total state
-    previous_sum = sum(state)
-    new_sum = sum(new_state)
-    for idx in range(len(new_state)):
-        new_state[idx] = new_state[idx] * (previous_sum / new_sum)
-
-    return new_state
-
-
-def apply_diffusion(state):
+def apply_diffusion(state, rule):
     """Calls cell automaton function for diffusion"""
-
-    # prepare state for the cell automaton working with flat structures
-    flattened_state = list(state.flatten())
-    n_cells = state.shape[1]
-
-    flattened_new_state = apply_automaton_rule(flattened_state, n_cells)
-
-    # return the new state in the original form
-    return np.reshape(
-        flattened_new_state,
-        state.shape
-    )
+    return rule.apply(State(state)).data
 
 
 def simulate_sun(energy, n_cells):
@@ -277,6 +210,9 @@ if __name__ == "__main__":
     density = np.ones((n_layers, n_cells)) * 1.0
     energy = np.ones((n_layers, n_cells)) * 1.0
 
+    # Create the diffusion rule instance
+    diffusion_rule = RuleDiffusion(von_neumann=True, renormalize=True)
+
     # Create a tickless figure with two subplots
     fig, (ax_density, ax_energy) = plt.subplots(ncols=2)
     ax_density = init_plot(ax_density, sphere_radius, "Density")
@@ -317,10 +253,10 @@ if __name__ == "__main__":
         density = simulate_upthrust(density, energy, n_layers, n_cells)
 
         # Update energy by diffusion (keeps total energy same)
-        energy = apply_diffusion(energy)
+        energy = apply_diffusion(energy, diffusion_rule)
 
         # Update density by diffusion (keeps total density same)
-        density = apply_diffusion(density)
+        density = apply_diffusion(density, diffusion_rule)
 
         # compute derivatives between cells, representing winds
         di_density, dj_density = finite_difference(density)
