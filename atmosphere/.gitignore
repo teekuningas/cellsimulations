@@ -1,0 +1,10 @@
+# Generated frames and videos
+frames_grid/
+frames_ring/
+output_grid/
+output_ring/
+*.mp4
+
+# Python
+__pycache__/
+*.pyc
