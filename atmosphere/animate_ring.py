@@ -2,19 +2,19 @@
 # requires-python = ">=3.10"
 # dependencies = ["numpy", "matplotlib"]
 # ///
-"""Generate MP4 animation of ring atmosphere simulation.
+"""Animated ring model — slow sun reveals the Hadley convection cell.
 
-Uses symmetric pressure + gravity model.
+Left:  Ring cross-section (temperature + wind arrows)
+Right: Wind profile at 4 positions relative to sun
 
 Run:  uv run cellsimulations/atmosphere/animate_ring.py
-Then: nix shell nixpkgs#ffmpeg --command ffmpeg -framerate 30 -i cellsimulations/atmosphere/frames_ring/f_%04d.png -c:v libx264 -pix_fmt yuv420p cellsimulations/atmosphere/ring.mp4
 """
 
 import sys, os
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from physics import RingGeometry, Params, step_ring, diagnostics
+from physics import RingGeometry, Params, step_ring
 
 import matplotlib
 matplotlib.use('Agg')
@@ -22,102 +22,179 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.collections as clt
 
-# -- Config --
-N_LAYERS, N_CELLS = 8, 48
-geo = RingGeometry(N_LAYERS, N_CELLS)
-p = Params(solar=0.25, cooling=0.03, diffuse=0.0)
-G = 0.08
+# ═══════════════════════════════════════════════════════════
+#  Configuration
+# ═══════════════════════════════════════════════════════════
 
-SPHERE_R = 10.0
-CELL_R = 0.5
-TOTAL_FRAMES = 600
-SUBSTEPS = 5
-SUN_SPEED = 0.01
-FRAMES_DIR = os.path.join(os.path.dirname(__file__), 'frames_ring')
+N_LAYERS = 16
+N_CELLS = 48
+G = 0.04
+SUN_SPEED = 0.002
 
-# -- State --
-T = np.zeros(geo.shape)
-u = np.zeros(geo.shape)
-w = np.zeros(geo.shape)
+FPS = 10
+DURATION = 10
+TOTAL_FRAMES = FPS * DURATION  # 100
+SUBSTEPS = 20
+
+SPHERE_R = 8.0
+CELL_R = 0.38
+FRAMES_DIR = os.path.join(os.path.dirname(__file__), 'output_animations', 'ring')
+
+p = Params(solar=0.20, cooling=0.025, c_sq=0.15, diffuse=0.0, drag=0.02)
 
 
-def cell_xy(n_layers, n_cells, R, cr):
+# ═══════════════════════════════════════════════════════════
+#  Helpers
+# ═══════════════════════════════════════════════════════════
+
+def cell_positions(n_layers, n_cells, R, cr):
     pos = np.zeros((n_layers, n_cells, 2))
     for layer in range(n_layers):
         r = R + layer * cr * 2.2
         for cell in range(n_cells):
-            a = cell / n_cells * 2 * np.pi
-            pos[layer, cell] = [np.cos(a) * r, np.sin(a) * r]
+            angle = cell / n_cells * 2 * np.pi
+            pos[layer, cell] = [np.cos(angle) * r, np.sin(angle) * r]
     return pos
 
-def make_dots(pos, cr):
-    circles = []
-    for layer in range(pos.shape[0]):
-        for cell in range(pos.shape[1]):
-            circles.append(patches.Circle(pos[layer, cell], radius=cr))
-    return clt.PatchCollection(circles, edgecolors='gray', linewidths=0.2)
 
-def make_arrows(pos, u_f, w_f, n_cells, scale=3.0):
-    arrows = []
-    for layer in range(pos.shape[0]):
-        for cell in range(n_cells):
-            x, y = pos[layer, cell]
-            a = cell / n_cells * 2 * np.pi
-            uv, wv = u_f[layer, cell] * scale, w_f[layer, cell] * scale
-            dx = -np.sin(a) * uv + np.cos(a) * wv
-            dy = np.cos(a) * uv + np.sin(a) * wv
-            if abs(dx) + abs(dy) > 1e-6:
-                arrows.append(patches.Arrow(x, y, dx, dy, width=0.3))
-    if not arrows:
-        arrows.append(patches.Arrow(0, 0, 0, 0, width=0))
-    return clt.PatchCollection(arrows, color='steelblue', alpha=0.7)
+# ═══════════════════════════════════════════════════════════
+#  Main
+# ═══════════════════════════════════════════════════════════
 
-def t_colors(T_field):
-    flat = T_field.ravel()
-    vmax = max(abs(flat.max()), abs(flat.min()), 0.01)
-    return plt.cm.RdBu_r((flat + vmax) / (2 * vmax))
+def main():
+    geo = RingGeometry(N_LAYERS, N_CELLS)
+    T = np.zeros(geo.shape)
+    u = np.zeros(geo.shape)
+    w = np.zeros(geo.shape)
+    sun = 0.0
 
-def sun_marker_xy(sun_angle, R, n_layers, cr):
-    """Sun orbits outside the atmosphere, not inside the earth."""
-    r = R + n_layers * cr * 2.2 + 2.5
-    return np.cos(sun_angle) * r, np.sin(sun_angle) * r
+    os.makedirs(FRAMES_DIR, exist_ok=True)
+    pos = cell_positions(N_LAYERS, N_CELLS, SPHERE_R, CELL_R)
 
-
-# -- Run --
-os.makedirs(FRAMES_DIR, exist_ok=True)
-positions = cell_xy(N_LAYERS, N_CELLS, SPHERE_R, CELL_R)
-sun = 0.0
-
-print(f"Ring {N_LAYERS}x{N_CELLS}, generating {TOTAL_FRAMES} frames...")
-for frame in range(TOTAL_FRAMES):
-    for _ in range(SUBSTEPS):
+    # Warm up
+    print("Warming up...")
+    for _ in range(400):
         T, u, w = step_ring(T, u, w, geo, p, sun, g=G)
         sun += SUN_SPEED
 
-    d = diagnostics(T, u, w)
-    if frame % 100 == 0:
-        print(f"  {frame:4d}/{TOTAL_FRAMES} | E={d['total']:8.1f} wind={d['max_wind']:.3f}")
+    print(f"Rendering {TOTAL_FRAMES} frames at {FPS} fps → {DURATION}s")
+    ext = SPHERE_R + N_LAYERS * CELL_R * 2.5 + 3
 
-    fig, ax = plt.subplots(figsize=(9, 9))
-    ax.set_aspect('equal'); ax.axis('off')
-    ext = SPHERE_R + N_LAYERS * CELL_R * 2.5 + 2
-    ax.set_xlim(-ext, ext); ax.set_ylim(-ext, ext)
-    ax.add_patch(plt.Circle((0,0), SPHERE_R, color='#4a86c8', alpha=0.15))
+    for frame in range(TOTAL_FRAMES):
+        for _ in range(SUBSTEPS):
+            T, u, w = step_ring(T, u, w, geo, p, sun, g=G)
+            sun += SUN_SPEED
 
-    # Sun marker
-    sx, sy = sun_marker_xy(sun, SPHERE_R, N_LAYERS, CELL_R)
-    ax.plot(sx, sy, 'o', color='gold', markersize=12, zorder=10)
+        sun_angle = sun % (2 * np.pi)
 
-    dots = make_dots(positions, CELL_R)
-    dots.set_facecolors(t_colors(T))
-    ax.add_collection(dots)
-    ax.add_collection(make_arrows(positions, u, w, N_CELLS))
+        # --- Create fresh figure each frame (avoids text ghosting) ---
+        fig = plt.figure(figsize=(14, 7), facecolor='#131822')
+        gs = fig.add_gridspec(1, 2, width_ratios=[1.5, 1], wspace=0.08)
+        ax_ring = fig.add_subplot(gs[0])
+        ax_prof = fig.add_subplot(gs[1])
 
-    ax.set_title(f'Ring Atmosphere — frame {frame}  E={d["total"]:.0f}  wind={d["max_wind"]:.2f}',
-                 fontsize=11)
-    fig.savefig(os.path.join(FRAMES_DIR, f'f_{frame:04d}.png'), dpi=80)
-    plt.close(fig)
+        # === Left: Ring ===
+        ax_ring.set_facecolor('#131822')
+        ax_ring.set_aspect('equal')
+        ax_ring.axis('off')
+        ax_ring.set_xlim(-ext, ext)
+        ax_ring.set_ylim(-ext, ext)
 
-print(f"Done. {TOTAL_FRAMES} frames in {FRAMES_DIR}/")
-print(f"To make MP4:")
-print(f"  nix shell nixpkgs#ffmpeg --command ffmpeg -framerate 30 -i {FRAMES_DIR}/f_%04d.png -c:v libx264 -pix_fmt yuv420p cellsimulations/atmosphere/ring.mp4")
+        # Planet core
+        ax_ring.add_patch(plt.Circle((0, 0), SPHERE_R * 0.92,
+                                     color='#1e2a3a', alpha=0.7))
+
+        # Sun glow + marker
+        beam_r = ext - 0.5
+        sx = np.cos(sun_angle) * beam_r
+        sy = np.sin(sun_angle) * beam_r
+        ax_ring.add_patch(plt.Circle((sx, sy), 1.5, color='#FFD700', alpha=0.08))
+        ax_ring.plot(sx, sy, '*', color='#FFD700', markersize=22, zorder=10)
+
+        # Temperature cells (warm colormap, brighter)
+        vmax = max(np.max(T), 0.5)
+        norm_T = np.clip(T.ravel() / vmax, 0, 1)
+        # Use a custom blend: cold=slate blue, hot=bright orange
+        colors = plt.cm.YlOrRd(norm_T * 0.85 + 0.1)
+
+        circles = []
+        for layer in range(N_LAYERS):
+            for cell in range(N_CELLS):
+                circles.append(patches.Circle(pos[layer, cell], radius=CELL_R))
+        dots = clt.PatchCollection(circles, edgecolors='#3a3a3a', linewidths=0.15)
+        dots.set_facecolors(colors)
+        ax_ring.add_collection(dots)
+
+        # Wind arrows — bigger, more visible, on every layer but every 4th cell
+        scale = 4.0
+        for layer in range(N_LAYERS):
+            for cell in range(0, N_CELLS, 4):
+                x, y = pos[layer, cell]
+                angle = cell / N_CELLS * 2 * np.pi
+                uv = u[layer, cell] * scale
+                wv = w[layer, cell] * scale
+                dx = -np.sin(angle) * uv + np.cos(angle) * wv
+                dy = np.cos(angle) * uv + np.sin(angle) * wv
+                mag = np.sqrt(dx**2 + dy**2)
+                if mag > 0.08:
+                    alpha = min(0.4 + mag * 0.8, 0.95)
+                    ax_ring.annotate('', xy=(x + dx, y + dy), xytext=(x, y),
+                                    arrowprops=dict(arrowstyle='->', lw=1.0,
+                                                   color='#88ddff',
+                                                   alpha=alpha,
+                                                   mutation_scale=10))
+
+        ax_ring.set_title('Ring Model — Hadley Convection Cell',
+                         color='white', fontsize=12, pad=8)
+
+        # === Right: Wind profile ===
+        ax_prof.set_facecolor('#131822')
+
+        offsets = [0, N_CELLS // 4, N_CELLS // 2, 3 * N_CELLS // 4]
+        labels = ['☀ Under sun', '90° ahead', '● Opposite', '90° behind']
+        line_colors = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1']
+
+        for off, label, col in zip(offsets, labels, line_colors):
+            col_idx = int((sun_angle / (2 * np.pi) * N_CELLS + off) % N_CELLS)
+            ax_prof.plot(u[:, col_idx], range(N_LAYERS), color=col,
+                        lw=2.5, label=label, alpha=0.85)
+
+        ax_prof.axvline(0, color='#555', lw=0.8, ls='--')
+        ax_prof.set_xlabel('Horizontal wind (u)', color='#ccc', fontsize=10)
+        ax_prof.set_ylabel('Altitude (layer)', color='#ccc', fontsize=10)
+        ax_prof.set_title('Wind Profile', color='white', fontsize=11, pad=8)
+        ax_prof.set_xlim(-0.65, 0.65)
+        ax_prof.set_ylim(0, N_LAYERS - 1)
+        ax_prof.tick_params(colors='#999')
+        for spine in ax_prof.spines.values():
+            spine.set_color('#444')
+        ax_prof.grid(True, alpha=0.12, color='#555')
+
+        # Legend at bottom-right, below the curves
+        ax_prof.legend(fontsize=9, loc='lower right', framealpha=0.3,
+                      labelcolor='white', facecolor='#1a1a2e',
+                      edgecolor='#444')
+
+        # Frame info
+        fig.text(0.5, 0.01,
+                 f'frame {frame}/{TOTAL_FRAMES}  •  '
+                 f'sun: {np.degrees(sun_angle):.0f}°  •  '
+                 f'max |u|: {np.max(np.abs(u)):.2f}',
+                 color='#666', fontsize=8, ha='center')
+
+        fig.savefig(os.path.join(FRAMES_DIR, f'f_{frame:04d}.png'), dpi=100,
+                   facecolor=fig.get_facecolor())
+        plt.close(fig)
+
+        if frame % 25 == 0:
+            print(f"  {frame}/{TOTAL_FRAMES} ({100*frame//TOTAL_FRAMES}%)")
+
+    print(f"\nFrames → {FRAMES_DIR}/")
+    print(f"Stitch: nix shell nixpkgs#ffmpeg --command ffmpeg -framerate {FPS} "
+          f"-i {FRAMES_DIR}/f_%04d.png "
+          f"-c:v libx264 -pix_fmt yuv420p -crf 20 "
+          f"{os.path.dirname(FRAMES_DIR)}/ring.mp4")
+
+
+if __name__ == '__main__':
+    main()

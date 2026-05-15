@@ -1,10 +1,8 @@
-# Generated frames and videos
-frames_grid/
-frames_ring/
-output_grid/
+# Generated output
+output_animations/
 output_ring/
-output_analysis/
-*.mp4
+output_grid/
+output_sphere/
 
 # Python
 __pycache__/
