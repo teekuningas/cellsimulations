@@ -3,6 +3,7 @@ frames_grid/
 frames_ring/
 output_grid/
 output_ring/
+output_analysis/
 *.mp4
 
 # Python

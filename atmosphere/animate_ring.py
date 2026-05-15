@@ -4,6 +4,8 @@
 # ///
 """Generate MP4 animation of ring atmosphere simulation.
 
+Uses symmetric pressure + gravity model.
+
 Run:  uv run cellsimulations/atmosphere/animate_ring.py
 Then: nix shell nixpkgs#ffmpeg --command ffmpeg -framerate 30 -i cellsimulations/atmosphere/frames_ring/f_%04d.png -c:v libx264 -pix_fmt yuv420p cellsimulations/atmosphere/ring.mp4
 """
@@ -23,8 +25,8 @@ import matplotlib.collections as clt
 # -- Config --
 N_LAYERS, N_CELLS = 8, 48
 geo = RingGeometry(N_LAYERS, N_CELLS)
-p = Params(solar=0.25, cooling=0.03)
-BUOYANCY = 0.2
+p = Params(solar=0.25, cooling=0.03, diffuse=0.0)
+G = 0.08
 
 SPHERE_R = 10.0
 CELL_R = 0.5
@@ -89,7 +91,7 @@ sun = 0.0
 print(f"Ring {N_LAYERS}x{N_CELLS}, generating {TOTAL_FRAMES} frames...")
 for frame in range(TOTAL_FRAMES):
     for _ in range(SUBSTEPS):
-        T, u, w = step_ring(T, u, w, geo, p, sun, buoyancy=BUOYANCY)
+        T, u, w = step_ring(T, u, w, geo, p, sun, g=G)
         sun += SUN_SPEED
 
     d = diagnostics(T, u, w)

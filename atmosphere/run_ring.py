@@ -4,6 +4,9 @@
 # ///
 """Ring experiment — vertical cross-section convection.
 
+Uses symmetric pressure + gravity. Buoyancy-like circulation emerges
+from their competition without an explicit buoyancy rule.
+
 Run:  uv run cellsimulations/atmosphere/run_ring.py
 """
 
@@ -22,8 +25,8 @@ import matplotlib.collections as clt
 # -- Config --
 N_LAYERS, N_CELLS = 8, 48
 geo = RingGeometry(N_LAYERS, N_CELLS)
-p = Params(solar=0.25, cooling=0.03)
-BUOYANCY = 0.2
+p = Params(solar=0.25, cooling=0.03, diffuse=0.0)
+G = 0.08
 
 SPHERE_R = 10.0
 CELL_R = 0.5
@@ -83,10 +86,10 @@ positions = cell_xy(N_LAYERS, N_CELLS, SPHERE_R, CELL_R)
 sun = 0.0
 energy_hist = []
 
-print(f"Ring {N_LAYERS}x{N_CELLS}, {TOTAL_FRAMES} frames, params: {p}, buoyancy={BUOYANCY}")
+print(f"Ring {N_LAYERS}x{N_CELLS}, {TOTAL_FRAMES} frames, params: {p}, g={G}")
 for frame in range(TOTAL_FRAMES):
     for _ in range(SUBSTEPS):
-        T, u, w = step_ring(T, u, w, geo, p, sun, buoyancy=BUOYANCY)
+        T, u, w = step_ring(T, u, w, geo, p, sun, g=G)
         sun += SUN_SPEED
 
     d = diagnostics(T, u, w)
